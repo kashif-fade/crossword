@@ -969,6 +969,7 @@ function Sudoku() {
               border: `2px solid ${T.ink}`,
               background: T.panel,
               width: "100%",
+              boxSizing: "border-box",
               opacity: generating ? 0.4 : 1,
             }}
           >
