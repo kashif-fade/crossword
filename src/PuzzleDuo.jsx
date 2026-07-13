@@ -1,20 +1,24 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 
 // ---------------------------------------------------------------
-// THEME
+// THEME — cherry blossoms anchor the palette (sakura pink as the primary
+// accent), with misty mountain slate and soft greenery as supporting tones.
 // ---------------------------------------------------------------
 const T = {
-  page: "#EDF1F2",
-  panel: "#FFFFFF",
-  ink: "#22313A",
-  inkSoft: "#5C6B74",
-  line: "#C7D0D4",
-  accent: "#106B5D",
-  accentSoft: "#DCEBE5",
-  accentSel: "#A9D8CB",
-  wrongBg: "#F6DCD5",
-  wrongInk: "#B03A22",
-  block: "#22313A",
+  page: "#EEF3EE",       // soft rain-washed mist
+  panel: "#FFFBF8",      // warm ivory, like paper
+  ink: "#33413A",        // deep mountain slate-green
+  inkSoft: "#74847A",    // muted sage
+  line: "#E4D8DC",       // pale dusty pink-grey
+  accent: "#C6698A",      // sakura pink (primary interactive)
+  accentSoft: "#FBE6EE", // pale blossom
+  accentSel: "#F0B9CE",  // deeper blossom pink, for selection
+  wrongBg: "#F8DEE4",    // soft rose (harmonized, not orange-red)
+  wrongInk: "#AD4A65",
+  block: "#33413A",
+  moss: "#6E9B7B",       // greenery accent (sudoku's identity)
+  mossSoft: "#E1EEE3",
+  mossSel: "#B9D9C2",
 };
 
 // ---------------------------------------------------------------
@@ -153,6 +157,65 @@ function sdGenerate(difficulty) {
 // ---------------------------------------------------------------
 // SHARED SMALL COMPONENTS
 // ---------------------------------------------------------------
+
+// A single cherry blossom petal: five-lobed sakura shape, drawn as SVG so it
+// stays crisp at any size (rather than relying on emoji font rendering).
+const PETAL_PATH =
+  "M12 2c1.8 0 3 1.6 3 3.4 0 1-.4 1.9-1 2.6 1-.3 2-.1 2.7.6 1.3 1.3 1.3 3.4 0 4.7-.7.7-1.7.9-2.7.6.6.7 1 1.6 1 2.6 0 1.8-1.2 3.4-3 3.4s-3-1.6-3-3.4c0-1 .4-1.9 1-2.6-1 .3-2 .1-2.7-.6-1.3-1.3-1.3-3.4 0-4.7.7-.7 1.7-.9 2.7-.6-.6-.7-1-1.6-1-2.6C9 3.6 10.2 2 12 2z";
+
+function Petal({ style }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={style.size}
+      height={style.size}
+      style={{
+        position: "absolute",
+        left: style.left,
+        top: 0,
+        opacity: 0,
+        animation: `petal-fall ${style.duration}s linear ${style.delay}s infinite`,
+        "--drift": style.drift,
+      }}
+      className="petal"
+    >
+      <path d={PETAL_PATH} fill={style.color} />
+    </svg>
+  );
+}
+
+function PetalsBackground() {
+  const petals = useMemo(() => {
+    const colors = [T.accent, T.accentSel, "#F6D0DE"];
+    return Array.from({ length: 14 }, (_, i) => ({
+      key: i,
+      left: `${Math.random() * 100}%`,
+      size: 12 + Math.random() * 10,
+      duration: 11 + Math.random() * 9,
+      delay: Math.random() * 14,
+      drift: `${Math.random() * 120 - 60}px`,
+      color: colors[i % colors.length],
+    }));
+  }, []);
+
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        overflow: "hidden",
+        pointerEvents: "none",
+        zIndex: 0,
+      }}
+    >
+      {petals.map((p) => (
+        <Petal key={p.key} style={p} />
+      ))}
+    </div>
+  );
+}
+
 function Btn({ children, onClick, primary, disabled }) {
   return (
     <button
@@ -820,15 +883,15 @@ function Sudoku() {
                     justifyContent: "center",
                     fontSize: "clamp(16px, 4vw, 22px)",
                     fontWeight: given ? 700 : 600,
-                    color: isWrong ? T.wrongInk : given ? T.ink : T.accent,
+                    color: isWrong ? T.wrongInk : given ? T.ink : T.moss,
                     background: isSel
-                      ? T.accentSel
+                      ? T.mossSel
                       : isWrong
                       ? T.wrongBg
                       : sameVal
-                      ? T.accentSoft
+                      ? T.mossSoft
                       : inLine
-                      ? "#F2F6F5"
+                      ? "#F3F7F3"
                       : T.panel,
                     borderRight:
                       c === 8 ? "none" : c % 3 === 2 ? `2px solid ${T.ink}` : `1px solid ${T.line}`,
@@ -951,35 +1014,40 @@ export default function PuzzleDuo() {
     <div
       style={{
         minHeight: "100vh",
-        background: T.page,
+        background: `linear-gradient(180deg, ${T.page} 0%, #F5EDF0 55%, #FBEEF2 100%)`,
         color: T.ink,
         fontFamily:
           "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         padding: "24px 16px 48px",
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      <div style={{ maxWidth: 860, margin: "0 auto" }}>
+      <PetalsBackground />
+      <div style={{ maxWidth: 860, margin: "0 auto", position: "relative", zIndex: 1 }}>
         <header style={{ marginBottom: 20 }}>
           <h1
             style={{
-              fontFamily: "Georgia, 'Times New Roman', serif",
-              fontSize: "clamp(26px, 5vw, 34px)",
+              fontFamily: "'Cormorant Garamond', Georgia, serif",
+              fontWeight: 600,
+              fontSize: "clamp(30px, 5.5vw, 40px)",
               margin: 0,
-              letterSpacing: "-0.01em",
+              letterSpacing: "0.01em",
+              color: T.ink,
             }}
           >
-            The Daily Duo
+            🌸 The Daily Duo
           </h1>
           <p style={{ margin: "4px 0 0", color: T.inkSoft, fontSize: 14 }}>
-            One crossword, one sudoku. Demo build — local play only.
+            One crossword, one sudoku — a quiet corner for two.
           </p>
         </header>
 
-        {/* Tabs styled as crossword cells */}
+        {/* Tabs styled as crossword cells, each with its own seasonal accent */}
         <div style={{ display: "flex", gap: 1, marginBottom: 24, background: T.ink, width: "fit-content", border: `2px solid ${T.ink}` }}>
           {[
-            { id: "crossword", label: "Crossword", num: 1 },
-            { id: "sudoku", label: "Sudoku", num: 2 },
+            { id: "crossword", label: "Crossword", num: 1, color: T.accentSel },
+            { id: "sudoku", label: "Sudoku", num: 2, color: T.mossSel },
           ].map((t) => (
             <button
               key={t.id}
@@ -988,7 +1056,7 @@ export default function PuzzleDuo() {
                 position: "relative",
                 padding: "14px 26px 10px",
                 border: "none",
-                background: tab === t.id ? T.accentSel : T.panel,
+                background: tab === t.id ? t.color : T.panel,
                 color: T.ink,
                 fontSize: 15,
                 fontWeight: 700,
