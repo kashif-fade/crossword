@@ -289,8 +289,10 @@ function Crossword() {
 
   const hiddenInputRef = useRef(null);
   const focusHiddenInput = () => {
-    // small delay helps iOS Safari register focus right after a tap
-    setTimeout(() => hiddenInputRef.current && hiddenInputRef.current.focus(), 0);
+    // must be synchronous, inside the actual tap handler -- iOS Safari only
+    // shows the on-screen keyboard for a focus() call made directly within
+    // a genuine user-gesture event, not deferred via setTimeout/promise
+    if (hiddenInputRef.current) hiddenInputRef.current.focus();
   };
 
   const enterLetter = useCallback(
@@ -446,12 +448,11 @@ function Crossword() {
         tabIndex={-1}
         aria-label="Crossword letter entry"
         style={{
-          position: "fixed",
+          position: "absolute",
           top: 0,
-          left: 0,
+          left: -9999,
           width: 1,
           height: 1,
-          opacity: 0,
           border: "none",
           padding: 0,
           fontSize: 16, // >=16px keeps iOS Safari from auto-zooming on focus
@@ -505,6 +506,7 @@ function Crossword() {
                   <div
                     key={key}
                     onClick={() => clickCell(r, c)}
+                    onTouchStart={focusHiddenInput}
                     style={{
                       width: cellSize,
                       height: cellSize,
