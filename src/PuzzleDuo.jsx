@@ -29,6 +29,7 @@ const T = {
 const STORAGE_KEY = "puzzle-duo-state-v1";
 
 function loadAppState() {
+  if (typeof window === "undefined") return {}; // Fix for Server Environments
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -353,7 +354,10 @@ function Crossword() {
 
   useEffect(() => {
     fetch("/crosswords.json")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Network response error");
+        return r.json();
+      })
       .then((data) => setLibrary(data))
       .catch(() => setLibraryError(true));
   }, []);
@@ -373,32 +377,39 @@ function Crossword() {
     return { size: 11, label: `Midi #${midiIndex + 1} of ${library.length}`, ...p };
   }, [mode, library, midiIndex]);
 
-  const [grid, setGrid] = useState([]);
+  // FIX: Safe initial frame state initialization to prevent unhandled crashing loops on Vercel
+  const [grid, setGrid] = useState(() => {
+    const saved = mode === "mini" ? miniGrid : midiGrids[midiIndex];
+    if (puzzle && isValidGrid(saved, puzzle.size) && saved.every(row => Array.isArray(row))) {
+      return saved;
+    }
+    return puzzle 
+      ? puzzle.solution.map((row) => row.map((c) => (c === null ? null : "")))
+      : [];
+  });
+  
   const [sel, setSel] = useState({ r: 0, c: 0 });
   const [dir, setDir] = useState("across");
   const [wrong, setWrong] = useState(new Set());
 
   // whenever the active puzzle changes (switching mode/index, or the
-// library finishing its fetch), load its saved progress if any exists,
-// otherwise start blank
-useEffect(() => {
-  if (!puzzle) return;
-  const saved = mode === "mini" ? miniGrid : midiGrids[midiIndex];
-  
-  // DEFENSIVE CHECK: Ensure the saved grid matches the puzzle structure exactly
-  const isSavedValid = isValidGrid(saved, puzzle.size) && 
-                       saved.every(row => Array.isArray(row));
+  // library finishing its fetch), load its saved progress if any exists,
+  // otherwise start blank
+  useEffect(() => {
+    if (!puzzle) return;
+    const saved = mode === "mini" ? miniGrid : midiGrids[midiIndex];
+    const isSavedValid = isValidGrid(saved, puzzle.size) && saved.every(row => Array.isArray(row));
 
-  setGrid(
-    isSavedValid
-      ? saved
-      : puzzle.solution.map((row) => row.map((c) => (c === null ? null : "")))
-  );
-  setSel({ r: 0, c: 0 });
-  setDir("across");
-  setWrong(new Set());
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [puzzle]);
+    setGrid(
+      isSavedValid
+        ? saved
+        : puzzle.solution.map((row) => row.map((c) => (c === null ? null : "")))
+    );
+    setSel({ r: 0, c: 0 });
+    setDir("across");
+    setWrong(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzle]);
 
   // keep the per-puzzle saved snapshot in sync as the user types
   useEffect(() => {
@@ -431,9 +442,9 @@ useEffect(() => {
 
   const solved = useMemo(
     () =>
-      puzzle
+      puzzle && grid.length > 0
         ? grid.every((row, r) =>
-            row.every((v, c) => puzzle.solution[r][c] === null || v === puzzle.solution[r][c])
+            row && row.every((v, c) => puzzle.solution[r][c] === null || v === puzzle.solution[r][c])
           )
         : false,
     [grid, puzzle]
@@ -467,7 +478,7 @@ useEffect(() => {
   const setCell = (r, c, val) => {
     setGrid((g) => {
       const n = g.map((row) => [...row]);
-      n[r][c] = val;
+      if (n[r]) n[r][c] = val;
       return n;
     });
     setWrong((w) => {
@@ -480,9 +491,6 @@ useEffect(() => {
 
   const hiddenInputRef = useRef(null);
   const focusHiddenInput = () => {
-    // must be synchronous, inside the actual tap handler -- iOS Safari only
-    // shows the on-screen keyboard for a focus() call made directly within
-    // a genuine user-gesture event, not deferred via setTimeout/promise
     if (hiddenInputRef.current) hiddenInputRef.current.focus();
   };
 
@@ -575,7 +583,7 @@ useEffect(() => {
   const clickClue = (cl, d) => {
     setDir(d);
     const cells = wordCells(puzzle, cl.row, cl.col, d);
-    const firstEmpty = cells.find(([r, c]) => !grid[r][c]);
+    const firstEmpty = cells.find(([r, c]) => !grid[r]?.[c]);
     const [r, c] = firstEmpty || cells[0];
     setSel({ r, c });
     focusHiddenInput();
@@ -584,11 +592,13 @@ useEffect(() => {
   const check = () => {
     if (!puzzle) return;
     const w = new Set();
-    grid.forEach((row, r) =>
-      row.forEach((v, c) => {
-        if (puzzle.solution[r][c] !== null && v && v !== puzzle.solution[r][c]) w.add(`${r},${c}`);
-      })
-    );
+    grid.forEach((row, r) => {
+      if (row) {
+        row.forEach((v, c) => {
+          if (puzzle.solution[r][c] !== null && v && v !== puzzle.solution[r][c]) w.add(`${r},${c}`);
+        });
+      }
+    });
     setWrong(w);
   };
 
@@ -623,9 +633,6 @@ useEffect(() => {
 
   return (
     <div>
-      {/* Invisible, always-refocused input so iOS/Android show their on-screen
-          keyboard when a cell is tapped -- a bare div/click has nothing for
-          mobile Safari to attach a keyboard to. */}
       <input
         ref={hiddenInputRef}
         value=""
@@ -646,7 +653,7 @@ useEffect(() => {
           height: 1,
           border: "none",
           padding: 0,
-          fontSize: 16, // >=16px keeps iOS Safari from auto-zooming on focus
+          fontSize: 16,
         }}
       />
 
@@ -682,7 +689,6 @@ useEffect(() => {
       )}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "flex-start" }}>
-        {/* Grid */}
         <div>
           <div
             style={{
@@ -743,7 +749,8 @@ useEffect(() => {
                         {puzzle.numbers[key]}
                       </span>
                     )}
-                    {!block && grid[r][c]}
+                    {/* FIX: Safe optional chaining ensures unmounted/legacy row shapes never crash */}
+                    {!block && grid[r]?.[c]}
                   </div>
                 );
               })
@@ -776,7 +783,6 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Clues */}
         <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
           {["across", "down"].map((d) => (
             <div key={d} style={{ minWidth: 200 }}>
@@ -846,7 +852,7 @@ function Sudoku() {
   const [difficulty, setDifficulty] = useState(() => persisted?.difficulty || "medium");
   const [game, setGame] = useState(() => persisted?.game || sdGenerate(persisted?.difficulty || "medium"));
   const [grid, setGrid] = useState(() => persisted?.grid || [...game.puzzle]);
-  // pencil[i] is a Set of candidate numbers (1-9) marked in that cell
+
   const [pencil, setPencil] = useState(() =>
     persisted?.pencil
       ? persisted.pencil.map((arr) => new Set(arr))
@@ -862,7 +868,6 @@ function Sudoku() {
   const newGame = (diff) => {
     setGenerating(true);
     setDifficulty(diff);
-    // let the button state paint before the (brief) generation work
     setTimeout(() => {
       const g = sdGenerate(diff);
       setGame(g);
@@ -880,8 +885,6 @@ function Sudoku() {
     [grid, game]
   );
 
-  // count each puzzle only once: flip solvedCurrent the moment it's solved,
-  // and don't count again until a new puzzle is started
   useEffect(() => {
     if (solved && !solvedCurrent) {
       setSolvedCurrent(true);
@@ -889,8 +892,6 @@ function Sudoku() {
     }
   }, [solved, solvedCurrent]);
 
-  // persist everything needed to resume this exact puzzle after the
-  // browser is closed and reopened
   useEffect(() => {
     saveAppState({
       sudoku: {
@@ -914,10 +915,7 @@ function Sudoku() {
       });
       setPencil((p) => {
         const n = [...p];
-        // entering (or clearing) a final digit wipes that cell's own notes
         n[sel] = new Set();
-        // and removes that digit from notes in the same row/col/box,
-        // since it's no longer a valid candidate there
         if (v !== 0) {
           for (const peer of sdPeers(sel)) {
             if (n[peer].has(v)) {
@@ -944,6 +942,7 @@ function Sudoku() {
       if (sel === null || game.puzzle[sel] !== 0 || grid[sel] !== 0) return;
       setPencil((p) => {
         const n = [...p];
+        // FIX: Deep-clone the individual targeted Set to prevent reference mutations
         const s = new Set(n[sel]);
         if (s.has(v)) s.delete(v);
         else s.add(v);
@@ -1117,7 +1116,6 @@ function Sudoku() {
             })}
           </div>
 
-          {/* number pad */}
           <div
             style={{
               display: "grid",
@@ -1145,7 +1143,9 @@ function Sudoku() {
                 {n}
               </button>
             ))}
+            {/* FIX: Explicit layout key prop to comply with React element standards */}
             <button
+              key="backspace"
               onClick={() => setValue(0)}
               style={{
                 aspectRatio: "1",
@@ -1228,7 +1228,6 @@ function PuzzleDuo() {
           </p>
         </header>
 
-        {/* Tabs styled as crossword cells, each with its own seasonal accent */}
         <div style={{ display: "flex", gap: 1, marginBottom: 24, background: T.ink, width: "fit-content", border: `2px solid ${T.ink}` }}>
           {[
             { id: "crossword", label: "Crossword", num: 1, color: T.accentSel },
@@ -1272,9 +1271,6 @@ function PuzzleDuo() {
   );
 }
 
-// If anything in the app throws during render -- most likely from
-// unexpectedly-shaped data in localStorage after a code update -- this
-// catches it and offers a way to recover instead of leaving a blank page.
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -1290,7 +1286,7 @@ class ErrorBoundary extends React.Component {
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
-      // ignore -- we're reloading regardless
+      // safe fallback
     }
     window.location.reload();
   };
