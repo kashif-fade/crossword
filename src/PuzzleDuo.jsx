@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 
 // ---------------------------------------------------------------
 // THEME
@@ -287,6 +287,41 @@ function Crossword() {
     });
   };
 
+  const hiddenInputRef = useRef(null);
+  const focusHiddenInput = () => {
+    // small delay helps iOS Safari register focus right after a tap
+    setTimeout(() => hiddenInputRef.current && hiddenInputRef.current.focus(), 0);
+  };
+
+  const enterLetter = useCallback(
+    (letter) => {
+      if (!puzzle) return;
+      const { r, c } = sel;
+      if (!isBlock(puzzle, r, c)) {
+        setCell(r, c, letter.toUpperCase());
+        const idx = activeCells.findIndex(([ar, ac]) => ar === r && ac === c);
+        if (idx >= 0 && idx < activeCells.length - 1) {
+          const [nr, nc] = activeCells[idx + 1];
+          setSel({ r: nr, c: nc });
+        }
+      }
+    },
+    [puzzle, sel, activeCells]
+  );
+
+  const backspace = useCallback(() => {
+    const { r, c } = sel;
+    if (grid[r] && grid[r][c]) setCell(r, c, "");
+    else {
+      const idx = activeCells.findIndex(([ar, ac]) => ar === r && ac === c);
+      if (idx > 0) {
+        const [pr, pc] = activeCells[idx - 1];
+        setSel({ r: pr, c: pc });
+        setCell(pr, pc, "");
+      }
+    }
+  }, [sel, activeCells, grid]);
+
   const move = useCallback(
     (dr, dc) => {
       if (!puzzle) return;
@@ -306,6 +341,7 @@ function Crossword() {
     [puzzle]
   );
 
+  // physical keyboard (desktop)
   useEffect(() => {
     const onKey = (e) => {
       if (!puzzle) return;
@@ -313,37 +349,32 @@ function Crossword() {
       else if (e.key === "ArrowDown") { setDir("down"); move(1, 0); e.preventDefault(); }
       else if (e.key === "ArrowLeft") { setDir("across"); move(0, -1); e.preventDefault(); }
       else if (e.key === "ArrowRight") { setDir("across"); move(0, 1); e.preventDefault(); }
-      else if (/^[a-zA-Z]$/.test(e.key)) {
-        const { r, c } = sel;
-        if (!isBlock(puzzle, r, c)) {
-          setCell(r, c, e.key.toUpperCase());
-          const idx = activeCells.findIndex(([ar, ac]) => ar === r && ac === c);
-          if (idx >= 0 && idx < activeCells.length - 1) {
-            const [nr, nc] = activeCells[idx + 1];
-            setSel({ r: nr, c: nc });
-          }
-        }
-        e.preventDefault();
-      } else if (e.key === "Backspace") {
-        const { r, c } = sel;
-        if (grid[r][c]) setCell(r, c, "");
-        else {
-          const idx = activeCells.findIndex(([ar, ac]) => ar === r && ac === c);
-          if (idx > 0) {
-            const [pr, pc] = activeCells[idx - 1];
-            setSel({ r: pr, c: pc });
-            setCell(pr, pc, "");
-          }
-        }
-        e.preventDefault();
-      }
+      else if (/^[a-zA-Z]$/.test(e.key)) { enterLetter(e.key); e.preventDefault(); }
+      else if (e.key === "Backspace") { backspace(); e.preventDefault(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, activeCells, grid, move, puzzle]);
+  }, [move, enterLetter, backspace, puzzle]);
+
+  // mobile virtual keyboard: a hidden, always-refocused input so iOS/Android
+  // bring up their on-screen keyboard when a cell is tapped
+  const onHiddenInputChange = (e) => {
+    const val = e.target.value;
+    e.target.value = "";
+    const letters = val.replace(/[^a-zA-Z]/g, "");
+    for (const ch of letters) enterLetter(ch);
+  };
+  const onHiddenInputKeyDown = (e) => {
+    if (e.key === "Backspace") { backspace(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { setDir("down"); move(-1, 0); e.preventDefault(); }
+    else if (e.key === "ArrowDown") { setDir("down"); move(1, 0); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { setDir("across"); move(0, -1); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { setDir("across"); move(0, 1); e.preventDefault(); }
+  };
 
   const clickCell = (r, c) => {
     if (isBlock(puzzle, r, c)) return;
+    focusHiddenInput();
     if (sel.r === r && sel.c === c) setDir((d) => (d === "across" ? "down" : "across"));
     else setSel({ r, c });
   };
@@ -354,6 +385,7 @@ function Crossword() {
     const firstEmpty = cells.find(([r, c]) => !grid[r][c]);
     const [r, c] = firstEmpty || cells[0];
     setSel({ r, c });
+    focusHiddenInput();
   };
 
   const check = () => {
@@ -398,6 +430,34 @@ function Crossword() {
 
   return (
     <div>
+      {/* Invisible, always-refocused input so iOS/Android show their on-screen
+          keyboard when a cell is tapped -- a bare div/click has nothing for
+          mobile Safari to attach a keyboard to. */}
+      <input
+        ref={hiddenInputRef}
+        value=""
+        onChange={onHiddenInputChange}
+        onKeyDown={onHiddenInputKeyDown}
+        autoCapitalize="characters"
+        autoCorrect="off"
+        autoComplete="off"
+        spellCheck="false"
+        inputMode="text"
+        tabIndex={-1}
+        aria-label="Crossword letter entry"
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: 1,
+          height: 1,
+          opacity: 0,
+          border: "none",
+          padding: 0,
+          fontSize: 16, // >=16px keeps iOS Safari from auto-zooming on focus
+        }}
+      />
+
       {solved && <Banner>Solved — nicely done.</Banner>}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
