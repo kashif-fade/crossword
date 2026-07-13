@@ -90,6 +90,20 @@ function sdFindEmpty(g) {
   for (let i = 0; i < 81; i++) if (g[i] === 0) return i;
   return -1;
 }
+function sdPeers(idx) {
+  const r = Math.floor(idx / 9), c = idx % 9;
+  const br = r - (r % 3), bc = c - (c % 3);
+  const peers = new Set();
+  for (let i = 0; i < 9; i++) {
+    peers.add(r * 9 + i);
+    peers.add(i * 9 + c);
+  }
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++)
+      peers.add((br + i) * 9 + (bc + j));
+  peers.delete(idx);
+  return [...peers];
+}
 function sdFill(g) {
   const idx = sdFindEmpty(g);
   if (idx < 0) return true;
@@ -503,10 +517,21 @@ function Sudoku() {
         n[sel] = v;
         return n;
       });
-      // entering (or clearing) a final digit wipes that cell's candidate notes
       setPencil((p) => {
         const n = [...p];
+        // entering (or clearing) a final digit wipes that cell's own notes
         n[sel] = new Set();
+        // and removes that digit from notes in the same row/col/box,
+        // since it's no longer a valid candidate there
+        if (v !== 0) {
+          for (const peer of sdPeers(sel)) {
+            if (n[peer].has(v)) {
+              const s = new Set(n[peer]);
+              s.delete(v);
+              n[peer] = s;
+            }
+          }
+        }
         return n;
       });
       setWrong((w) => {
