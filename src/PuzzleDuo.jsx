@@ -379,21 +379,26 @@ function Crossword() {
   const [wrong, setWrong] = useState(new Set());
 
   // whenever the active puzzle changes (switching mode/index, or the
-  // library finishing its fetch), load its saved progress if any exists,
-  // otherwise start blank
-  useEffect(() => {
-    if (!puzzle) return;
-    const saved = mode === "mini" ? miniGrid : midiGrids[midiIndex];
-    setGrid(
-      isValidGrid(saved, puzzle.size)
-        ? saved
-        : puzzle.solution.map((row) => row.map((c) => (c === null ? null : "")))
-    );
-    setSel({ r: 0, c: 0 });
-    setDir("across");
-    setWrong(new Set());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [puzzle]);
+// library finishing its fetch), load its saved progress if any exists,
+// otherwise start blank
+useEffect(() => {
+  if (!puzzle) return;
+  const saved = mode === "mini" ? miniGrid : midiGrids[midiIndex];
+  
+  // DEFENSIVE CHECK: Ensure the saved grid matches the puzzle structure exactly
+  const isSavedValid = isValidGrid(saved, puzzle.size) && 
+                       saved.every(row => Array.isArray(row));
+
+  setGrid(
+    isSavedValid
+      ? saved
+      : puzzle.solution.map((row) => row.map((c) => (c === null ? null : "")))
+  );
+  setSel({ r: 0, c: 0 });
+  setDir("across");
+  setWrong(new Set());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [puzzle]);
 
   // keep the per-puzzle saved snapshot in sync as the user types
   useEffect(() => {
