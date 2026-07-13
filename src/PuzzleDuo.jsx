@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 
 // ---------------------------------------------------------------
 // THEME — cherry blossoms anchor the palette (sakura pink as the primary
@@ -46,6 +46,46 @@ function saveAppState(patch) {
     // storage unavailable (private browsing, quota, etc) -- fail silently,
     // the app still works, it just won't remember between visits
   }
+}
+
+// Validates that a saved grid is really an NxN array of strings/nulls
+// before trusting it -- guards against stale data left over from an
+// earlier version of the app whose puzzle shapes may have changed.
+function isValidGrid(g, size) {
+  if (!Array.isArray(g) || g.length !== size) return false;
+  return g.every(
+    (row) =>
+      Array.isArray(row) &&
+      row.length === size &&
+      row.every((cell) => cell === null || typeof cell === "string")
+  );
+}
+
+function isValidSudokuNums(arr) {
+  return (
+    Array.isArray(arr) &&
+    arr.length === 81 &&
+    arr.every((v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 9)
+  );
+}
+
+function isValidPencilArray(p) {
+  return (
+    Array.isArray(p) &&
+    p.length === 81 &&
+    p.every((cell) => Array.isArray(cell) && cell.every((n) => typeof n === "number"))
+  );
+}
+
+// validated as a whole: game/grid/pencil are interdependent, so either all
+// of it is trustworthy or none of it is (a partially-valid mix would leave
+// grid values that don't correspond to the loaded puzzle)
+function isValidSudokuSave(saved) {
+  if (!saved || !saved.game) return false;
+  if (!isValidSudokuNums(saved.game.puzzle) || !isValidSudokuNums(saved.game.solution)) return false;
+  if (!isValidSudokuNums(saved.grid)) return false;
+  if (saved.pencil !== undefined && !isValidPencilArray(saved.pencil)) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------
@@ -298,10 +338,18 @@ function Crossword() {
 
   // per-puzzle saved fill state, so switching puzzles (or reopening the
   // browser) restores exactly what was there before
-  const [miniGrid, setMiniGrid] = useState(() => persisted?.miniGrid || null);
-  const [midiGrids, setMidiGrids] = useState(() => persisted?.midiGrids || {});
-  const [solvedIndices, setSolvedIndices] = useState(() => persisted?.solvedIndices || []);
-  const [miniSolved, setMiniSolved] = useState(() => persisted?.miniSolved || false);
+  const [miniGrid, setMiniGrid] = useState(() =>
+    isValidGrid(persisted?.miniGrid, 5) ? persisted.miniGrid : null
+  );
+  const [midiGrids, setMidiGrids] = useState(() =>
+    persisted?.midiGrids && typeof persisted.midiGrids === "object" && !Array.isArray(persisted.midiGrids)
+      ? persisted.midiGrids
+      : {}
+  );
+  const [solvedIndices, setSolvedIndices] = useState(() =>
+    Array.isArray(persisted?.solvedIndices) ? persisted.solvedIndices : []
+  );
+  const [miniSolved, setMiniSolved] = useState(() => Boolean(persisted?.miniSolved));
 
   useEffect(() => {
     fetch("/crosswords.json")
@@ -310,9 +358,17 @@ function Crossword() {
       .catch(() => setLibraryError(true));
   }, []);
 
+  // guard against a persisted index that's out of range for the actual
+  // library (e.g. if the library ever changes size)
+  useEffect(() => {
+    if (library && (midiIndex < 0 || midiIndex >= library.length)) {
+      setMidiIndex(0);
+    }
+  }, [library, midiIndex]);
+
   const puzzle = useMemo(() => {
     if (mode === "mini") return MINI_PUZZLE;
-    if (!library) return null;
+    if (!library || midiIndex < 0 || midiIndex >= library.length) return null;
     const p = library[midiIndex];
     return { size: 11, label: `Midi #${midiIndex + 1} of ${library.length}`, ...p };
   }, [mode, library, midiIndex]);
@@ -328,7 +384,11 @@ function Crossword() {
   useEffect(() => {
     if (!puzzle) return;
     const saved = mode === "mini" ? miniGrid : midiGrids[midiIndex];
-    setGrid(saved || puzzle.solution.map((row) => row.map((c) => (c === null ? null : ""))));
+    setGrid(
+      isValidGrid(saved, puzzle.size)
+        ? saved
+        : puzzle.solution.map((row) => row.map((c) => (c === null ? null : "")))
+    );
     setSel({ r: 0, c: 0 });
     setDir("across");
     setWrong(new Set());
@@ -773,7 +833,10 @@ function Crossword() {
 // SUDOKU TAB
 // ---------------------------------------------------------------
 function Sudoku() {
-  const persisted = useMemo(() => loadAppState().sudoku, []);
+  const persisted = useMemo(() => {
+    const raw = loadAppState().sudoku;
+    return isValidSudokuSave(raw) ? raw : null;
+  }, []);
 
   const [difficulty, setDifficulty] = useState(() => persisted?.difficulty || "medium");
   const [game, setGame] = useState(() => persisted?.game || sdGenerate(persisted?.difficulty || "medium"));
@@ -1120,7 +1183,7 @@ function Sudoku() {
 // ---------------------------------------------------------------
 // APP SHELL
 // ---------------------------------------------------------------
-export default function PuzzleDuo() {
+function PuzzleDuo() {
   const [tab, setTab] = useState(() => loadAppState().tab || "crossword");
 
   useEffect(() => {
@@ -1201,5 +1264,77 @@ export default function PuzzleDuo() {
         {tab === "crossword" ? <Crossword /> : <Sudoku />}
       </div>
     </div>
+  );
+}
+
+// If anything in the app throws during render -- most likely from
+// unexpectedly-shaped data in localStorage after a code update -- this
+// catches it and offers a way to recover instead of leaving a blank page.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("PuzzleDuo crashed:", error, info);
+  }
+  clearAndReload = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore -- we're reloading regardless
+    }
+    window.location.reload();
+  };
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 16,
+            padding: 24,
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            textAlign: "center",
+          }}
+        >
+          <p style={{ fontSize: 16, maxWidth: 420 }}>
+            Something went wrong loading the app. This usually means saved
+            progress from an older version doesn't match the current one.
+          </p>
+          <button
+            onClick={this.clearAndReload}
+            style={{
+              padding: "10px 20px",
+              borderRadius: 8,
+              border: "none",
+              background: "#C6698A",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: "pointer",
+            }}
+          >
+            Clear saved progress and reload
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function PuzzleDuoApp() {
+  return (
+    <ErrorBoundary>
+      <PuzzleDuo />
+    </ErrorBoundary>
   );
 }
