@@ -468,6 +468,9 @@ function Sudoku() {
   const [difficulty, setDifficulty] = useState("medium");
   const [game, setGame] = useState(() => sdGenerate("medium"));
   const [grid, setGrid] = useState(() => [...game.puzzle]);
+  // pencil[i] is a Set of candidate numbers (1-9) marked in that cell
+  const [pencil, setPencil] = useState(() => Array.from({ length: 81 }, () => new Set()));
+  const [mode, setMode] = useState("pen"); // "pen" | "pencil"
   const [sel, setSel] = useState(null);
   const [wrong, setWrong] = useState(new Set());
   const [generating, setGenerating] = useState(false);
@@ -480,6 +483,7 @@ function Sudoku() {
       const g = sdGenerate(diff);
       setGame(g);
       setGrid([...g.puzzle]);
+      setPencil(Array.from({ length: 81 }, () => new Set()));
       setSel(null);
       setWrong(new Set());
       setGenerating(false);
@@ -499,6 +503,12 @@ function Sudoku() {
         n[sel] = v;
         return n;
       });
+      // entering (or clearing) a final digit wipes that cell's candidate notes
+      setPencil((p) => {
+        const n = [...p];
+        n[sel] = new Set();
+        return n;
+      });
       setWrong((w) => {
         if (!w.has(sel)) return w;
         const n = new Set(w);
@@ -509,19 +519,48 @@ function Sudoku() {
     [sel, game]
   );
 
+  const togglePencil = useCallback(
+    (v) => {
+      if (sel === null || game.puzzle[sel] !== 0 || grid[sel] !== 0) return;
+      setPencil((p) => {
+        const n = [...p];
+        const s = new Set(n[sel]);
+        if (s.has(v)) s.delete(v);
+        else s.add(v);
+        n[sel] = s;
+        return n;
+      });
+    },
+    [sel, game, grid]
+  );
+
+  const enterDigit = useCallback(
+    (v) => {
+      if (mode === "pencil") togglePencil(v);
+      else setValue(v);
+    },
+    [mode, togglePencil, setValue]
+  );
+
   useEffect(() => {
     const onKey = (e) => {
       if (sel === null) return;
-      if (/^[1-9]$/.test(e.key)) { setValue(parseInt(e.key, 10)); e.preventDefault(); }
-      else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") { setValue(0); e.preventDefault(); }
-      else if (e.key === "ArrowUp") { setSel((s) => (s >= 9 ? s - 9 : s)); e.preventDefault(); }
+      if (/^[1-9]$/.test(e.key)) {
+        const n = parseInt(e.key, 10);
+        if (e.shiftKey) togglePencil(n);
+        else setValue(n);
+        e.preventDefault();
+      } else if (e.key === "Backspace" || e.key === "Delete" || e.key === "0") {
+        setValue(0);
+        e.preventDefault();
+      } else if (e.key === "ArrowUp") { setSel((s) => (s >= 9 ? s - 9 : s)); e.preventDefault(); }
       else if (e.key === "ArrowDown") { setSel((s) => (s < 72 ? s + 9 : s)); e.preventDefault(); }
       else if (e.key === "ArrowLeft") { setSel((s) => (s % 9 > 0 ? s - 1 : s)); e.preventDefault(); }
       else if (e.key === "ArrowRight") { setSel((s) => (s % 9 < 8 ? s + 1 : s)); e.preventDefault(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, setValue]);
+  }, [sel, setValue, togglePencil]);
 
   const check = () => {
     const w = new Set();
@@ -539,13 +578,26 @@ function Sudoku() {
     <div>
       {solved && <Banner>Solved — grid complete and correct.</Banner>}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 13, color: T.inkSoft, fontWeight: 600 }}>New puzzle:</span>
         {["easy", "medium", "hard"].map((d) => (
           <Btn key={d} onClick={() => newGame(d)} primary={difficulty === d} disabled={generating}>
             {d[0].toUpperCase() + d.slice(1)}
           </Btn>
         ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 13, color: T.inkSoft, fontWeight: 600 }}>Input:</span>
+        <Btn onClick={() => setMode("pen")} primary={mode === "pen"}>
+          ✎ Final
+        </Btn>
+        <Btn onClick={() => setMode("pencil")} primary={mode === "pencil"}>
+          ⚬ Notes
+        </Btn>
+        <span style={{ fontSize: 12, color: T.inkSoft }}>
+          (or hold Shift while typing a number for a quick note)
+        </span>
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "flex-start" }}>
@@ -571,6 +623,7 @@ function Sudoku() {
                     Math.floor(c / 3) === Math.floor(selCol / 3)));
               const sameVal = selVal !== 0 && v === selVal && !isSel;
               const isWrong = wrong.has(i);
+              const notes = pencil[i];
               return (
                 <div
                   key={i}
@@ -600,7 +653,36 @@ function Sudoku() {
                     userSelect: "none",
                   }}
                 >
-                  {v !== 0 && v}
+                  {v !== 0 ? (
+                    v
+                  ) : notes && notes.size > 0 ? (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(3, 1fr)",
+                        gridTemplateRows: "repeat(3, 1fr)",
+                        width: "100%",
+                        height: "100%",
+                        padding: "2px",
+                      }}
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+                        <div
+                          key={n}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "clamp(7px, 2vw, 10px)",
+                            fontWeight: 600,
+                            color: T.inkSoft,
+                          }}
+                        >
+                          {notes.has(n) ? n : ""}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -618,7 +700,7 @@ function Sudoku() {
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
               <button
                 key={n}
-                onClick={() => setValue(n)}
+                onClick={() => enterDigit(n)}
                 style={{
                   aspectRatio: "1",
                   borderRadius: 8,
